@@ -1,33 +1,75 @@
 package mr
 
-import "log"
+import (
+	"errors"
+	"log"
+	"sync"
+)
 import "net"
 import "os"
 import "net/rpc"
 import "net/http"
 
-
 type Coordinator struct {
 	// Your definitions here.
-
+	mu          sync.Mutex    // 用于保护并发访问的互斥锁
+	mapFiles    []string      // 存储输入文件的列表
+	nReduce     int           // Reduce任务的数量
+	mapTasks    []*TaskStatus // 存储Map任务的状态信息
+	reduceTasks []*TaskStatus // 存储Reduce任务的状态信息
 }
 
-// Your code here -- RPC handlers for the worker to call.
+// TaskStatus 存储任务的状态信息
+type TaskStatus struct {
+	TaskID int    // 任务的唯一标识符
+	Phase  string // 任务所处的阶段，可能是"Map"或"Reduce"
+	//Worker     string    // 执行任务的Worker节点地址
+	//StartTime  time.Time // 任务开始执行的时间
+	//FinishTime time.Time // 任务完成执行的时间
+	State TaskState // 任务的状态，可能是"Idle"、"InProgress"、"Completed"等
+}
 
-//
+// TaskState 表示任务的状态
+type TaskState int
+
+const (
+	Idle TaskState = iota
+	InProgress
+	Completed
+	Failed
+)
+
+// Your code here -- RPC handlers for the worker to call.
+// 在每个 Worker 启动时调用，Master 把待处理 Map 任务分配给 Worker
+func (c *Coordinator) SetMap(args *SetMapArgs, reply *SetMapReply) error {
+	// 使用互斥锁保护并发访问
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// 遍历所有的 Map 任务
+	for _, mt := range c.mapTasks {
+		// 如果任务处于空闲状态，则分配给当前 Worker
+		if mt.State == Idle {
+			mt.State = InProgress                  // 将任务状态设置为进行中
+			reply.WorkId = mt.TaskID               // 返回任务的唯一标识符
+			reply.FileName = c.mapFiles[mt.TaskID] // 返回任务对应的文件名
+			log.Printf("SetMap MapId=%d is Set,FileName=%v\n", mt.TaskID, c.mapFiles[mt.TaskID])
+			return nil
+		}
+	}
+	//fmt.Println(c.mapTasks)
+	log.Println("--c.SetMap-- filed")
+	return errors.New("--c.SetMap-- filed")
+}
+
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-//
 func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
 }
 
-
-//
 // start a thread that listens for RPCs from worker.go
-//
 func (c *Coordinator) server() {
 	rpc.Register(c)
 	rpc.HandleHTTP()
@@ -41,30 +83,38 @@ func (c *Coordinator) server() {
 	go http.Serve(l, nil)
 }
 
-//
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
-//
 func (c *Coordinator) Done() bool {
 	ret := false
 
 	// Your code here.
 
-
 	return ret
 }
 
-//
 // create a Coordinator.
 // main/mrcoordinator.go calls this function.
 // nReduce is the number of reduce tasks to use.
-//
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
-	c := Coordinator{}
+	c := &Coordinator{
+		mapFiles:    files,
+		nReduce:     nReduce,
+		mapTasks:    make([]*TaskStatus, len(files)),
+		reduceTasks: make([]*TaskStatus, nReduce),
+	}
 
+	// 初始化任务状态
+	for i := 0; i < len(files); i++ {
+		c.mapTasks[i] = &TaskStatus{TaskID: i, Phase: "Map", State: Idle}
+	}
+
+	for i := 0; i < nReduce; i++ {
+		c.reduceTasks[i] = &TaskStatus{TaskID: i, Phase: "Reduce", State: Idle}
+	}
+	//
 	// Your code here.
 
-
 	c.server()
-	return &c
+	return c
 }
