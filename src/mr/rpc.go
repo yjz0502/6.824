@@ -32,6 +32,21 @@ type SetMapReply struct {
 	FileName string
 }
 
+type EndMapArgs struct {
+	MapId int
+}
+
+type EndMapReply struct {
+}
+
+type SetReduceArgs struct {
+}
+
+type SetReduceReply struct {
+	ReduceID int
+	Kva      []KeyValue
+}
+
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
 // Can't use the current directory since

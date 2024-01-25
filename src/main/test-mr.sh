@@ -106,6 +106,8 @@ then
   echo '---' wc test: PASS
 else
   echo '---' wc output is not the same as mr-correct-wc.txt
+  # cat mr-correct-wc.txt  # Add this line to display content
+  diff mr-wc-all mr-correct-wc.txt  # 使用 diff 命令输出差异
   echo '---' wc test: FAIL
   failed_any=1
 fi

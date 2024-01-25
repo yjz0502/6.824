@@ -1,8 +1,11 @@
 package mr
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
+	"sort"
 	"sync"
 )
 import "net"
@@ -52,13 +55,63 @@ func (c *Coordinator) SetMap(args *SetMapArgs, reply *SetMapReply) error {
 			mt.State = InProgress                  // 将任务状态设置为进行中
 			reply.WorkId = mt.TaskID               // 返回任务的唯一标识符
 			reply.FileName = c.mapFiles[mt.TaskID] // 返回任务对应的文件名
-			log.Printf("SetMap MapId=%d is Set,FileName=%v\n", mt.TaskID, c.mapFiles[mt.TaskID])
+			//log.Printf("--c.SetMap-- MapId=%d is Set,FileName=%v\n", mt.TaskID, c.mapFiles[mt.TaskID])
 			return nil
 		}
 	}
-	//fmt.Println(c.mapTasks)
-	log.Println("--c.SetMap-- filed")
+	//log.Println("--c.SetMap-- filed")
 	return errors.New("--c.SetMap-- filed")
+}
+
+// 在每个 Worker的Map任务完成后向Coordinator发送消息修改MapTask状态
+func (c *Coordinator) EndMap(args *EndMapArgs, reply *EndMapReply) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.mapTasks[args.MapId].State = Completed
+	//log.Printf("--c.EndMap-- c.mapTasks[%d].State =%d\n", args.MapId, c.mapTasks[args.MapId].State)
+	return nil
+}
+
+// 把待处理的Reduce任务分配给Worker
+func (c *Coordinator) SetReduce(args *SetReduceArgs, reply *SetReduceReply) error {
+	// 使用互斥锁保护并发访问
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// 遍历所有的 Map 任务,所有Map任务都完成才可以执行Reduce任务
+	for _, mt := range c.mapTasks {
+		// 如果还有Map任务没有完成，则退出
+		if mt.State != Completed {
+			return errors.New(fmt.Sprintf("--c.SetReduce-- err:Map%d is InProgress", mt.TaskID))
+		}
+	}
+	// 遍历所有的 Reduce 任务
+	for _, mt := range c.reduceTasks {
+		// 如果任务处于空闲状态，则分配给当前 Worker
+		if mt.State == Idle {
+			mt.State = InProgress      // 将任务状态设置为进行中
+			reply.ReduceID = mt.TaskID // 返回任务的唯一标识符
+			//log.Printf("--c.SetReduce-- ReduceId=%d is Set\n", reply.ReduceID)
+			kva := []KeyValue{}
+			//读取各个Map任务的输出键值对到Reply
+			for i := 0; i < len(c.mapTasks); i++ {
+				file, _ := os.Open(fmt.Sprintf("mr-%d-%d", i, reply.ReduceID))
+				defer file.Close()
+				dec := json.NewDecoder(file)
+				for {
+					var kv KeyValue
+					if err := dec.Decode(&kv); err != nil {
+						break
+					}
+					kva = append(kva, kv)
+				}
+			}
+			sort.Sort(ByKey(kva))
+			reply.Kva = kva[:]
+			return nil
+		}
+	}
+
+	return errors.New("--c.SetReduce-- filed")
 }
 
 // an example RPC handler.
