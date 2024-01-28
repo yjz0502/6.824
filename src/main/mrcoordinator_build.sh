@@ -1,4 +1,4 @@
-go build -buildmode=plugin ../mrapps/wc.go
+go build -buildmode=plugin ../mrapps/jobcount.go
 rm mr-out*
 rm mr-*-*
 rm WoerkerLogFile*.txt
