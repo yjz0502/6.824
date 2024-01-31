@@ -47,6 +47,13 @@ type SetReduceReply struct {
 	Kva      []KeyValue
 }
 
+type EndReduceArgs struct {
+	ReduceId int
+}
+
+type EndReduceReply struct {
+}
+
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
 // Can't use the current directory since

@@ -6,3 +6,14 @@ Worker调用Mapf函数将输出键值对写入到中间文件中
 #### Second Commit
 7个测试通过5个，Worker异常推出或超时没有处理
 
+#### Third Commit
+实现c.Done方法
+
+TODO：
+所有map任务状态为Complete才不检测，
+
+所有Reduce任务状态为Complete才退出Worker
+
+TaskStatus新增字段：对应的WorkerID
+
+Master每十秒监控Worker是否存活

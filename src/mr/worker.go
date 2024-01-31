@@ -82,7 +82,8 @@ func Worker(mapf func(string, string) []KeyValue,
 			nReduce := 10
 			MidFile := []*os.File{}
 			for i := 0; i < nReduce; i++ {
-				file, err := os.Create("mr-" + strconv.Itoa(smReply.WorkId) + "-" + strconv.Itoa(i))
+				currentDir, _ := os.Getwd()
+				file, err := os.CreateTemp(currentDir, "mr-"+strconv.Itoa(smReply.WorkId)+"-"+strconv.Itoa(i))
 				defer file.Close()
 				if err != nil {
 					log.Fatalf("--Woerker%d-- cannot open %v", smReply.WorkId, filename)
@@ -106,8 +107,11 @@ func Worker(mapf func(string, string) []KeyValue,
 			log.Printf("--Woerker%d-- Write MiddleFile file Success", smReply.WorkId)
 
 			//Map任务结束，向Coordinator发送完成的休息，修改对应的MapTask状态
+			for i := 0; i < nReduce; i++ {
+				os.Rename(MidFile[i].Name(), "mr-"+strconv.Itoa(smReply.WorkId)+"-"+strconv.Itoa(i))
+			}
 			CallEndMap(smReply.WorkId)
-			time.Sleep(time.Second)
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	//执行Reduce任务
@@ -150,7 +154,8 @@ func Worker(mapf func(string, string) []KeyValue,
 			i = j
 		}
 		ofile.Close()
-		time.Sleep(time.Second)
+		CallEndReduce(srReply.ReduceID)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	// uncomment to send the Example RPC to the coordinator.
@@ -215,8 +220,29 @@ func CallSetReduce() (*SetReduceReply, error) {
 		//log.Printf("--CallSetReduce- succed reply.ReduceId= %d\n", reply.ReduceID)
 		return reply, nil
 	} else {
-		log.Printf("--CallSetRecude--filed！\n")
+		log.Printf("--CallSetReduce--filed！\n")
 		return nil, errors.New("--CallSetReduce--filed！")
+	}
+}
+
+func CallEndReduce(ReduceId int) error {
+	// 创建EndMapArgs,SetMapReply
+	args := &EndReduceArgs{
+		ReduceId: ReduceId,
+	}
+	reply := &EndReduceReply{}
+
+	// 调用 Coordinator.SetMap 进行 RPC 调用
+	ok := call("Coordinator.EndReduce", args, reply)
+
+	// 检查 RPC 调用是否成功
+	if ok {
+		// 打印响应值
+		log.Println("--CallEndReduce-- success")
+		return nil
+	} else {
+		log.Println("--CallEndReduce--filed！")
+		return errors.New("--CallEndReduce--filed！")
 	}
 }
 

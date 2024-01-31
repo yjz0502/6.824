@@ -7,6 +7,7 @@ import (
 	"log"
 	"sort"
 	"sync"
+	"time"
 )
 import "net"
 import "os"
@@ -67,9 +68,11 @@ func (c *Coordinator) SetMap(args *SetMapArgs, reply *SetMapReply) error {
 func (c *Coordinator) EndMap(args *EndMapArgs, reply *EndMapReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.mapTasks[args.MapId].State = Completed
-	//log.Printf("--c.EndMap-- c.mapTasks[%d].State =%d\n", args.MapId, c.mapTasks[args.MapId].State)
-	return nil
+	if c.mapTasks[args.MapId].State == InProgress {
+		c.mapTasks[args.MapId].State = Completed
+		return nil
+	}
+	return errors.New("--c.EndMap-- filed")
 }
 
 // 把待处理的Reduce任务分配给Worker
@@ -114,6 +117,17 @@ func (c *Coordinator) SetReduce(args *SetReduceArgs, reply *SetReduceReply) erro
 	return errors.New("--c.SetReduce-- filed")
 }
 
+// 在每个 Worker的Reduce任务完成后向Coordinator发送消息修改ReduceTask状态
+func (c *Coordinator) EndReduce(args *EndReduceArgs, reply *EndReduceReply) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.reduceTasks[args.ReduceId].State == InProgress {
+		c.reduceTasks[args.ReduceId].State = Completed
+		return nil
+	}
+	return errors.New("--c.EndReduce-- filed")
+}
+
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
@@ -134,15 +148,32 @@ func (c *Coordinator) server() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
+
+	// 启动定时器，每十秒执行一次检测客户端是否存在的函数
+	ticker := time.NewTicker(10 * time.Second)
+	for range ticker.C {
+		// 在这里调用检测客户端存在的函数，传入客户端的 ID 或其他信息
+		fmt.Println("client123")
+	}
 }
 
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
 	ret := false
-
 	// Your code here.
-
+	for {
+		ret = true
+		for _, v := range c.reduceTasks {
+			if v.State != Completed {
+				ret = false
+				break
+			}
+		}
+		if ret == true {
+			break
+		}
+	}
 	return ret
 }
 
