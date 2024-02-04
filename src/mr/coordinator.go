@@ -7,7 +7,6 @@ import (
 	"log"
 	"sort"
 	"sync"
-	"time"
 )
 import "net"
 import "os"
@@ -49,8 +48,13 @@ func (c *Coordinator) SetMap(args *SetMapArgs, reply *SetMapReply) error {
 	// 使用互斥锁保护并发访问
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	reply.AllComplete = true
 	// 遍历所有的 Map 任务
 	for _, mt := range c.mapTasks {
+		//只要有一个任务没完成就设为false
+		if mt.State != Completed {
+			reply.AllComplete = false
+		}
 		// 如果任务处于空闲状态，则分配给当前 Worker
 		if mt.State == Idle {
 			mt.State = InProgress                  // 将任务状态设置为进行中
@@ -61,6 +65,9 @@ func (c *Coordinator) SetMap(args *SetMapArgs, reply *SetMapReply) error {
 		}
 	}
 	//log.Println("--c.SetMap-- filed")
+	if reply.AllComplete == true {
+		return nil
+	}
 	return errors.New("--c.SetMap-- filed")
 }
 
@@ -80,6 +87,7 @@ func (c *Coordinator) SetReduce(args *SetReduceArgs, reply *SetReduceReply) erro
 	// 使用互斥锁保护并发访问
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	reply.AllComplete = true
 	// 遍历所有的 Map 任务,所有Map任务都完成才可以执行Reduce任务
 	for _, mt := range c.mapTasks {
 		// 如果还有Map任务没有完成，则退出
@@ -89,6 +97,10 @@ func (c *Coordinator) SetReduce(args *SetReduceArgs, reply *SetReduceReply) erro
 	}
 	// 遍历所有的 Reduce 任务
 	for _, mt := range c.reduceTasks {
+		//只要有一个任务没完成就设为false
+		if mt.State != Completed {
+			reply.AllComplete = false
+		}
 		// 如果任务处于空闲状态，则分配给当前 Worker
 		if mt.State == Idle {
 			mt.State = InProgress      // 将任务状态设置为进行中
@@ -113,7 +125,9 @@ func (c *Coordinator) SetReduce(args *SetReduceArgs, reply *SetReduceReply) erro
 			return nil
 		}
 	}
-
+	if reply.AllComplete == true {
+		return nil
+	}
 	return errors.New("--c.SetReduce-- filed")
 }
 
@@ -148,13 +162,6 @@ func (c *Coordinator) server() {
 		log.Fatal("listen error:", e)
 	}
 	go http.Serve(l, nil)
-
-	// 启动定时器，每十秒执行一次检测客户端是否存在的函数
-	ticker := time.NewTicker(10 * time.Second)
-	for range ticker.C {
-		// 在这里调用检测客户端存在的函数，传入客户端的 ID 或其他信息
-		fmt.Println("client123")
-	}
 }
 
 // main/mrcoordinator.go calls Done() periodically to find out

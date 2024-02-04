@@ -37,17 +37,18 @@ func ihash(key string, nReduce int) int {
 }
 
 // main/mrworker.go calls this function.
-func Worker(mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) {
+func Worker(mapf func(string, string) []KeyValue, reducef func(string, []string) string) {
 
 	// Your worker implementation here.
 	//分配给Worker一个Map任务
 	for {
 		smReply, err := CallSetMap()
 		if err != nil {
-			log.Println("--Worker-- CallSetMap Err")
-			break
+			log.Println("--Worker-- CallSetMap Err:Every Map is InProgress")
 		} else {
+			if smReply.AllComplete == true {
+				break
+			}
 			// 打开或创建日志文件
 			logFile, err := os.Create("WoerkerLogFile" + strconv.Itoa(smReply.WorkId) + ".txt")
 			if err != nil {
@@ -58,24 +59,18 @@ func Worker(mapf func(string, string) []KeyValue,
 			log.SetOutput(logFile)
 
 			//读取文件中的数据到content
-			filename := smReply.FileName
+			file, err := os.Open(smReply.FileName)
 			if err != nil {
-				log.Fatalf("--Woerker%d -- err:%v", smReply.WorkId, err)
-			}
-			//select {}
-
-			file, err := os.Open(filename)
-			if err != nil {
-				log.Fatalf("--Woerker%d-- cannot open %v", smReply.WorkId, filename)
+				log.Fatalf("--Woerker%d-- cannot open %v", smReply.WorkId, smReply.FileName)
 			}
 			content, err := io.ReadAll(file)
 			if err != nil {
-				log.Fatalf("--Woerker%d-- cannot read %v", smReply.WorkId, filename)
+				log.Fatalf("--Woerker%d-- cannot read %v", smReply.WorkId, smReply.FileName)
 			}
 			file.Close()
 
 			//调用map函数
-			kva := mapf(filename, string(content))
+			kva := mapf(smReply.FileName, string(content))
 			//log.Println(kva)
 
 			//建立MapReduce的中间文件，即Map任务的输出
@@ -86,7 +81,7 @@ func Worker(mapf func(string, string) []KeyValue,
 				file, err := os.CreateTemp(currentDir, "mr-"+strconv.Itoa(smReply.WorkId)+"-"+strconv.Itoa(i))
 				defer file.Close()
 				if err != nil {
-					log.Fatalf("--Woerker%d-- cannot open %v", smReply.WorkId, filename)
+					log.Fatalf("--Woerker%d-- cannot open %v", smReply.WorkId, smReply.FileName)
 				}
 				MidFile = append(MidFile, file)
 			}
@@ -111,16 +106,18 @@ func Worker(mapf func(string, string) []KeyValue,
 				os.Rename(MidFile[i].Name(), "mr-"+strconv.Itoa(smReply.WorkId)+"-"+strconv.Itoa(i))
 			}
 			CallEndMap(smReply.WorkId)
-			time.Sleep(100 * time.Millisecond)
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	//执行Reduce任务
 	for {
 		srReply, err := CallSetReduce()
 		if err != nil {
-			log.Printf("---Reduce-- CallSetReduce Err")
-			break
+			log.Println("--Worker-- CallSetReduce Err:Every Reduce is InProgress")
 		} else {
+			if srReply.AllComplete == true {
+				break
+			}
 			// 打开或创建日志文件
 			logFile, err := os.Create("ReduceLogFile" + strconv.Itoa(srReply.ReduceID) + ".txt")
 			if err != nil {
@@ -129,32 +126,32 @@ func Worker(mapf func(string, string) []KeyValue,
 			defer logFile.Close()
 			// 设置日志输出到文件
 			log.SetOutput(logFile)
-		}
-		log.Printf("--ReduceID%d--\n", srReply.ReduceID)
+			log.Printf("--ReduceID%d--\n", srReply.ReduceID)
 
-		oname := "mr-out-" + strconv.Itoa(srReply.ReduceID+1)
-		ofile, _ := os.Create(oname)
+			oname := "mr-out-" + strconv.Itoa(srReply.ReduceID+1)
+			ofile, _ := os.Create(oname)
 
-		// call Reduce on each distinct key in intermediate[],
-		// and print the result to mr-out-0.
-		//
-		i := 0
-		for i < len(srReply.Kva) {
-			j := i + 1
-			for j < len(srReply.Kva) && srReply.Kva[j].Key == srReply.Kva[i].Key {
-				j++
+			// call Reduce on each distinct key in intermediate[],
+			// and print the result to mr-out-0.
+			//
+			i := 0
+			for i < len(srReply.Kva) {
+				j := i + 1
+				for j < len(srReply.Kva) && srReply.Kva[j].Key == srReply.Kva[i].Key {
+					j++
+				}
+				values := []string{}
+				for k := i; k < j; k++ {
+					values = append(values, srReply.Kva[k].Value)
+				}
+				output := reducef(srReply.Kva[i].Key, values)
+				// this is the correct format for each line of Reduce output.
+				fmt.Fprintf(ofile, "%v %v\n", srReply.Kva[i].Key, output)
+				i = j
 			}
-			values := []string{}
-			for k := i; k < j; k++ {
-				values = append(values, srReply.Kva[k].Value)
-			}
-			output := reducef(srReply.Kva[i].Key, values)
-			// this is the correct format for each line of Reduce output.
-			fmt.Fprintf(ofile, "%v %v\n", srReply.Kva[i].Key, output)
-			i = j
+			ofile.Close()
+			CallEndReduce(srReply.ReduceID)
 		}
-		ofile.Close()
-		CallEndReduce(srReply.ReduceID)
 		time.Sleep(100 * time.Millisecond)
 	}
 
@@ -167,7 +164,8 @@ func CallSetMap() (*SetMapReply, error) {
 	args := &SetMapArgs{}
 	// 创建带有初始值的 SetMapReply
 	reply := &SetMapReply{
-		FileName: "",
+		FileName:    "",
+		AllComplete: false,
 	}
 
 	// 调用 Coordinator.SetMap 进行 RPC 调用

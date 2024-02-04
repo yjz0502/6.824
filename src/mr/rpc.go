@@ -28,8 +28,9 @@ type SetMapArgs struct {
 }
 
 type SetMapReply struct {
-	WorkId   int
-	FileName string
+	WorkId      int
+	FileName    string
+	AllComplete bool
 }
 
 type EndMapArgs struct {
@@ -43,8 +44,9 @@ type SetReduceArgs struct {
 }
 
 type SetReduceReply struct {
-	ReduceID int
-	Kva      []KeyValue
+	ReduceID    int
+	Kva         []KeyValue
+	AllComplete bool
 }
 
 type EndReduceArgs struct {
